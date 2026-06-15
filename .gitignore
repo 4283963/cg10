@@ -33,3 +33,27 @@ bin/
 obj/
 __pycache__/
 *.pyc
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+infrared-client/infrared-client
+
+# Java / Maven
+.mvn/
+mvnw
+mvnw.cmd
+!.mvn/wrapper/maven-wrapper.jar
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# Docker 数据卷
+influxdb-data/

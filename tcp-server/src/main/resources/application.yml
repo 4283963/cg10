@@ -1,0 +1,40 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: paper-dryer-monitor
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+
+netty:
+  tcp:
+    port: 9000
+    boss-threads: 2
+    worker-threads: 8
+
+influxdb:
+  url: http://127.0.0.1:8086
+  token: cg10-secret-token-2024
+  org: paper-mill
+  bucket: dryer-temperatures
+  batch-size: 500
+  flush-interval-ms: 500
+
+app:
+  cylinder:
+    count: 40
+    scan-points: 64
+    base-temperature: 105.0
+    low-threshold: 95.0
+    high-threshold: 130.0
+  compensation:
+    max-valve-adjustment: 15.0
+    min-valve-adjustment: -15.0
+    control-gain: 0.8
+    zone-count: 8
+  websocket:
+    broadcast-interval-ms: 100
