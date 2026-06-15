@@ -34,6 +34,7 @@
           :heatmap="selectedHeatmap"
           :baseTemperature="config.baseTemperature"
           :lowThreshold="config.lowThreshold"
+          @set-phase="handleSetPhase"
           class="panel detail-panel"
         />
         <div v-else class="panel detail-panel empty-panel">
@@ -87,6 +88,23 @@ const selectedHeatmap = computed(() => {
 
 function selectCylinder(id) {
   selectedCylinderId.value = id
+}
+
+async function handleSetPhase({ cylinderId, phase }) {
+  try {
+    const r = await api.put(`/api/phases/${cylinderId}`, { phase, operator: 'web' })
+    const updated = r.data
+    const idx = heatmaps.value.findIndex(h => h.cylinderId === cylinderId)
+    if (idx >= 0) {
+      const hm = { ...heatmaps.value[idx] }
+      hm.phase = updated.phase
+      hm.phaseLabel = updated.phaseLabel
+      hm.compensationLocked = updated.compensationLocked
+      heatmaps.value.splice(idx, 1, hm)
+    }
+  } catch (e) {
+    console.warn('设置阶段失败', e)
+  }
 }
 
 let ws = null

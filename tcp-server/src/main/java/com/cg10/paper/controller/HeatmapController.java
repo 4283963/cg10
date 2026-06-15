@@ -2,10 +2,12 @@ package com.cg10.paper.controller;
 
 import com.cg10.paper.config.AppProperties;
 import com.cg10.paper.model.CylinderHeatmap;
+import com.cg10.paper.model.CylinderPhase;
 import com.cg10.paper.model.SystemStatus;
 import com.cg10.paper.model.ValveCommand;
 import com.cg10.paper.plc.PlcControlService;
 import com.cg10.paper.service.InfluxDBStorageService;
+import com.cg10.paper.service.PhaseManager;
 import com.cg10.paper.service.TemperatureProcessor;
 import com.cg10.paper.tcpserver.TcpServer;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +26,7 @@ public class HeatmapController {
     private final InfluxDBStorageService storageService;
     private final PlcControlService plcControlService;
     private final AppProperties appProps;
+    private final PhaseManager phaseManager;
 
     @GetMapping("/heatmaps")
     public Map<String, Object> getAllHeatmaps() {
@@ -108,6 +111,18 @@ public class HeatmapController {
         double delta = ((Number) body.get("delta")).doubleValue();
         int zoneIndex = body.containsKey("zoneIndex") ? (Integer) body.get("zoneIndex") : 0;
 
+        if (phaseManager.isCompensationLocked(cylinderId)) {
+            CylinderPhase phase = phaseManager.getPhase(cylinderId);
+            Map<String, Object> reject = new HashMap<>();
+            reject.put("success", false);
+            reject.put("reason", "避让保护生效");
+            reject.put("phase", phase.getPhase());
+            reject.put("phaseLabel", phase.getPhaseLabel());
+            reject.put("message", String.format("烘缸 #%d 当前为「%s」，蒸汽阀门控制已锁定，禁止手动操作",
+                    cylinderId, phase.getPhaseLabel()));
+            return reject;
+        }
+
         double current = temperatureProcessor.getCylinderValveOpenings()
                 .getOrDefault(cylinderId, 50.0);
         double target = Math.min(100.0, Math.max(0.0, current + delta));
@@ -132,6 +147,40 @@ public class HeatmapController {
         Map<String, Object> resp = new HashMap<>();
         resp.put("success", true);
         resp.put("command", cmd);
+        return resp;
+    }
+
+    @GetMapping("/phases")
+    public Map<Integer, CylinderPhase> getAllPhases() {
+        return phaseManager.getAllPhases();
+    }
+
+    @GetMapping("/phases/{cylinderId}")
+    public CylinderPhase getPhase(@PathVariable int cylinderId) {
+        return phaseManager.getPhase(cylinderId);
+    }
+
+    @PutMapping("/phases/{cylinderId}")
+    public CylinderPhase setPhase(
+            @PathVariable int cylinderId,
+            @RequestBody Map<String, String> body) {
+        String phase = body.getOrDefault("phase", CylinderPhase.PRODUCTION);
+        String operator = body.getOrDefault("operator", "web");
+        return phaseManager.setPhase(cylinderId, phase, operator);
+    }
+
+    @PutMapping("/phases/batch")
+    public Map<String, Object> batchSetPhase(@RequestBody Map<String, Object> body) {
+        @SuppressWarnings("unchecked")
+        List<Integer> ids = (List<Integer>) body.get("cylinderIds");
+        String phase = (String) body.getOrDefault("phase", CylinderPhase.PRODUCTION);
+        String operator = (String) body.getOrDefault("operator", "web");
+        phaseManager.batchSetPhase(ids, phase, operator);
+        Map<String, Object> resp = new HashMap<>();
+        resp.put("success", true);
+        resp.put("updatedCount", ids.size());
+        resp.put("phase", phase);
+        resp.put("phaseLabel", CylinderPhase.getPhaseLabel(phase));
         return resp;
     }
 }

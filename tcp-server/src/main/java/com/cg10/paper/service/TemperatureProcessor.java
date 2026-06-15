@@ -2,6 +2,7 @@ package com.cg10.paper.service;
 
 import com.cg10.paper.config.AppProperties;
 import com.cg10.paper.model.CylinderHeatmap;
+import com.cg10.paper.model.CylinderPhase;
 import com.cg10.paper.model.ScanPayload;
 import com.cg10.paper.model.ValveCommand;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +22,7 @@ public class TemperatureProcessor {
     private final InfluxDBStorageService storageService;
     private final PlcControlService plcControlService;
     private final WebSocketBroadcastService broadcastService;
+    private final PhaseManager phaseManager;
 
     private final ConcurrentHashMap<Integer, double[]> latestHeatmaps = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, Long> lastUpdateTime = new ConcurrentHashMap<>();
@@ -48,14 +50,23 @@ public class TemperatureProcessor {
         List<CylinderHeatmap.ZoneAnomaly> anomalies = detectAnomalies(cylinderId, zoneTemps, avgTemp);
         if (!anomalies.isEmpty()) {
             anomalyCounter.addAndGet(anomalies.size());
-            Optional<ValveCommand> command = calculateValveAdjustment(cylinderId, zoneTemps, anomalies, avgTemp);
-            command.ifPresent(cmd -> {
-                plcControlService.sendCommand(cmd);
-                activeCompensations.incrementAndGet();
-            });
+            if (phaseManager.isCompensationLocked(cylinderId)) {
+                log.info("🔒 [缸#{}] 避让保护生效: 检测到 {} 个温度异常区域，但当前阶段为「{}」，蒸汽阀门补偿已锁死不下发",
+                        cylinderId, anomalies.size(), phaseManager.getPhase(cylinderId).getPhaseLabel());
+            } else {
+                Optional<ValveCommand> command = calculateValveAdjustment(cylinderId, zoneTemps, anomalies, avgTemp);
+                command.ifPresent(cmd -> {
+                    plcControlService.sendCommand(cmd);
+                    activeCompensations.incrementAndGet();
+                });
+            }
         }
 
+        CylinderPhase currentPhase = phaseManager.getPhase(cylinderId);
         CylinderHeatmap heatmap = buildHeatmap(cylinderId, payload.getTs(), tempArray, avgTemp, anomalies);
+        heatmap.setPhase(currentPhase.getPhase());
+        heatmap.setPhaseLabel(currentPhase.getPhaseLabel());
+        heatmap.setCompensationLocked(currentPhase.isCompensationLocked());
         broadcastService.broadcastHeatmap(heatmap);
     }
 
@@ -221,7 +232,12 @@ public class TemperatureProcessor {
             double avg = Arrays.stream(temps).average().orElse(baseTemp);
             double[] zoneTemps = calculateZoneTemperatures(temps);
             List<CylinderHeatmap.ZoneAnomaly> anomalies = detectAnomaliesQuick(zoneTemps, baseTemp);
-            result.put(id, buildHeatmap(id, lastUpdateTime.getOrDefault(id, 0L), temps, avg, anomalies));
+            CylinderHeatmap hm = buildHeatmap(id, lastUpdateTime.getOrDefault(id, 0L), temps, avg, anomalies);
+            CylinderPhase ph = phaseManager.getPhase(id);
+            hm.setPhase(ph.getPhase());
+            hm.setPhaseLabel(ph.getPhaseLabel());
+            hm.setCompensationLocked(ph.isCompensationLocked());
+            result.put(id, hm);
         }
         return result;
     }

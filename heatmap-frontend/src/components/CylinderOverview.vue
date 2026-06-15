@@ -8,6 +8,8 @@
         <span class="legend-item"><span class="dot warn"></span>预警</span>
         <span class="legend-item"><span class="dot danger"></span>严重</span>
         <span class="legend-item"><span class="dot offline"></span>离线</span>
+        <span class="legend-item"><span class="dot warm"></span>热机</span>
+        <span class="legend-item"><span class="dot cool"></span>冷机</span>
       </span>
     </div>
     <div class="cylinder-grid">
@@ -25,6 +27,10 @@
         <div class="cell-temp offline" v-else>--</div>
         <div class="cell-anomaly" v-if="getHeatmap(id)?.anomalies?.length">
           {{ getHeatmap(id).anomalies.length }}区
+        </div>
+        <div class="cell-phase" v-if="getHeatmap(id)?.phase && getHeatmap(id).phase !== 'production'"
+             :class="getHeatmap(id).phase">
+          {{ getHeatmap(id).phase === 'warming_up' ? '热' : '冷' }}
         </div>
       </div>
     </div>
@@ -50,6 +56,8 @@ function getHeatmap(id) {
 function getCellState(id) {
   const hm = getHeatmap(id)
   if (!hm) return 'offline'
+  if (hm.phase === 'warming_up') return 'warming'
+  if (hm.phase === 'cooling_down') return 'cooling'
   if (!hm.anomalies || hm.anomalies.length === 0) return 'ok'
   if (hm.anomalies.some(a => a.severity === 'critical')) return 'danger'
   return 'warn'
@@ -103,6 +111,8 @@ function getCellState(id) {
 .legend .dot.warn { background: #f59e0b; }
 .legend .dot.danger { background: #ef4444; }
 .legend .dot.offline { background: #475569; }
+.legend .dot.warm { background: #fbbf24; }
+.legend .dot.cool { background: #60a5fa; }
 
 .cylinder-grid {
   flex: 1;
@@ -157,6 +167,14 @@ function getCellState(id) {
   border-left: 3px solid #475569;
   opacity: 0.5;
 }
+.cylinder-cell.warming {
+  border-left: 3px solid #fbbf24;
+  background: rgba(251, 191, 36, 0.08);
+}
+.cylinder-cell.cooling {
+  border-left: 3px solid #60a5fa;
+  background: rgba(96, 165, 250, 0.06);
+}
 
 .cell-id {
   font-size: 11px;
@@ -184,6 +202,27 @@ function getCellState(id) {
   font-size: 9px;
   color: #f87171;
   font-weight: 600;
+}
+
+.cell-phase {
+  position: absolute;
+  bottom: 2px;
+  right: 3px;
+  font-size: 8px;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 3px;
+  line-height: 14px;
+}
+
+.cell-phase.warming_up {
+  background: rgba(251, 191, 36, 0.3);
+  color: #fde68a;
+}
+
+.cell-phase.cooling_down {
+  background: rgba(96, 165, 250, 0.3);
+  color: #bfdbfe;
 }
 
 @keyframes warnPulse {

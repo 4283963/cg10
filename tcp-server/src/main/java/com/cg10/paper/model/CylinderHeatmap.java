@@ -20,6 +20,9 @@ public class CylinderHeatmap {
     private double maxTemp;
     private double avgTemp;
     private List<ZoneAnomaly> anomalies;
+    private String phase;
+    private String phaseLabel;
+    private boolean compensationLocked;
 
     @Data
     @Builder

@@ -10,6 +10,44 @@
       </div>
     </div>
 
+    <div class="phase-bar" :class="heatmap.phase">
+      <div class="phase-left">
+        <span class="phase-label">设备操作阶段</span>
+        <select
+          class="phase-select"
+          :value="heatmap.phase"
+          @change="onPhaseChange($event)"
+        >
+          <option value="production">生产运行中</option>
+          <option value="warming_up">开机热机中</option>
+          <option value="cooling_down">维护冷机中</option>
+        </select>
+        <span class="phase-badge" :class="heatmap.phase">
+          {{ heatmap.phaseLabel || '生产运行中' }}
+        </span>
+      </div>
+      <div class="phase-right">
+        <div class="valve-status" :class="{ locked: heatmap.compensationLocked }">
+          <span class="valve-icon">{{ heatmap.compensationLocked ? '🔒' : '🔓' }}</span>
+          <span class="valve-text">
+            {{ heatmap.compensationLocked ? '蒸汽阀门已锁定 · 非生产避让状态' : '蒸汽阀门正常响应' }}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="heatmap.compensationLocked" class="avoidance-notice">
+      <div class="notice-icon">⚠️</div>
+      <div class="notice-content">
+        <div class="notice-title">热机状态智能避让保护已生效</div>
+        <div class="notice-desc">
+          当前阶段为「{{ heatmap.phaseLabel }}」，热传导计算与热力图刷新正常进行，
+          但自动热力补偿下发蒸汽阀门微调的逻辑已完全锁死不响应，
+          保护物理阀门不在非生产阶段被误操作拧坏。
+        </div>
+      </div>
+    </div>
+
     <div class="heatmap-area">
       <v-chart :option="chartOption" autoresize class="chart" />
     </div>
@@ -18,19 +56,23 @@
       <div class="anomaly-title">
         <span>⚠️ 温度异常区域</span>
         <span class="anomaly-count">{{ heatmap.anomalies.length }} 个区域</span>
+        <span v-if="heatmap.compensationLocked" class="lock-hint">
+          🔒 避让保护中 · 补偿指令已拦截
+        </span>
       </div>
       <div class="anomaly-list">
         <div
           v-for="(a, idx) in heatmap.anomalies"
           :key="idx"
           class="anomaly-item"
-          :class="a.severity"
+          :class="[a.severity, { avoided: heatmap.compensationLocked }]"
         >
           <span class="zone-name">{{ a.zoneName }}区</span>
           <span class="deviation" :class="a.direction">
             {{ a.direction === 'low' ? '偏低' : '偏高' }} {{ Math.abs(a.deviation).toFixed(1) }}°C
           </span>
           <span class="severity-badge">{{ severityText(a.severity) }}</span>
+          <span v-if="heatmap.compensationLocked" class="avoid-badge">已拦截</span>
         </div>
       </div>
     </div>
@@ -45,7 +87,7 @@
 import { computed } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import { HeatmapChart, GaugeChart } from 'echarts/charts'
+import { HeatmapChart } from 'echarts/charts'
 import {
   GridComponent,
   TooltipComponent,
@@ -53,7 +95,7 @@ import {
 } from 'echarts/components'
 import VChart from 'vue-echarts'
 
-use([CanvasRenderer, HeatmapChart, GaugeChart, GridComponent, TooltipComponent, VisualMapComponent])
+use([CanvasRenderer, HeatmapChart, GridComponent, TooltipComponent, VisualMapComponent])
 
 const props = defineProps({
   heatmap: Object,
@@ -61,8 +103,15 @@ const props = defineProps({
   lowThreshold: { type: Number, default: 95 }
 })
 
+const emit = defineEmits(['set-phase'])
+
 function severityText(s) {
   return { critical: '严重', warning: '预警', info: '提示' }[s] || s
+}
+
+function onPhaseChange(event) {
+  const newPhase = event.target.value
+  emit('set-phase', { cylinderId: props.heatmap.cylinderId, phase: newPhase })
 }
 
 const chartOption = computed(() => {
@@ -77,11 +126,6 @@ const chartOption = computed(() => {
       const noise = (Math.sin(r * 1.5 + c * 0.3) * 0.8 + (Math.random() - 0.5) * 0.6)
       data.push([c, r, +(baseT + noise).toFixed(2)])
     }
-  }
-
-  const xLabels = []
-  for (let i = 0; i < cols; i += 8) {
-    xLabels.push(i + 1)
   }
 
   const minT = Math.max(60, (props.heatmap?.minTemp || 90) - 5)
@@ -136,16 +180,8 @@ const chartOption = computed(() => {
       top: 'center',
       inRange: {
         color: [
-          '#1e40af',
-          '#2563eb',
-          '#3b82f6',
-          '#60a5fa',
-          '#93c5fd',
-          '#fef3c7',
-          '#fbbf24',
-          '#f59e0b',
-          '#ef4444',
-          '#dc2626'
+          '#1e40af', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd',
+          '#fef3c7', '#fbbf24', '#f59e0b', '#ef4444', '#dc2626'
         ]
       },
       textStyle: { color: 'rgba(148, 163, 184, 0.8)', fontSize: 10 },
@@ -162,9 +198,7 @@ const chartOption = computed(() => {
           shadowColor: 'rgba(0, 0, 0, 0.5)'
         }
       },
-      itemStyle: {
-        borderWidth: 0
-      }
+      itemStyle: { borderWidth: 0 }
     }]
   }
 })
@@ -220,6 +254,175 @@ const chartOption = computed(() => {
 .stat .val.cold { color: #60a5fa; }
 .stat .val.hot { color: #f87171; }
 
+.phase-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  border: 1px solid;
+  gap: 12px;
+}
+
+.phase-bar.production {
+  background: rgba(22, 101, 52, 0.12);
+  border-color: rgba(34, 197, 94, 0.25);
+}
+
+.phase-bar.warming_up {
+  background: rgba(146, 64, 14, 0.15);
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+.phase-bar.cooling_down {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(96, 165, 250, 0.3);
+}
+
+.phase-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.phase-label {
+  font-size: 12px;
+  color: rgba(148, 163, 184, 0.7);
+  white-space: nowrap;
+}
+
+.phase-select {
+  background: rgba(15, 23, 42, 0.8);
+  color: #e2e8f0;
+  border: 1px solid rgba(100, 116, 139, 0.4);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.phase-select:hover {
+  border-color: rgba(96, 165, 250, 0.6);
+}
+
+.phase-select:focus {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2);
+}
+
+.phase-select option {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+.phase-badge {
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.phase-badge.production {
+  background: rgba(34, 197, 94, 0.2);
+  color: #86efac;
+}
+
+.phase-badge.warming_up {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fde68a;
+  animation: warmPulse 2s infinite;
+}
+
+.phase-badge.cooling_down {
+  background: rgba(96, 165, 250, 0.2);
+  color: #bfdbfe;
+}
+
+@keyframes warmPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.phase-right {
+  display: flex;
+  align-items: center;
+}
+
+.valve-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.valve-status.locked {
+  background: rgba(100, 116, 139, 0.15);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.valve-icon {
+  font-size: 14px;
+}
+
+.valve-text {
+  color: #86efac;
+  font-weight: 600;
+}
+
+.valve-status.locked .valve-text {
+  color: rgba(148, 163, 184, 0.7);
+  font-weight: 600;
+}
+
+.avoidance-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-bottom: 10px;
+  background: linear-gradient(135deg, rgba(146, 64, 14, 0.15), rgba(180, 83, 9, 0.08));
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: 6px;
+  animation: noticeFadeIn 0.4s ease;
+}
+
+@keyframes noticeFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.notice-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.notice-content {
+  flex: 1;
+}
+
+.notice-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fbbf24;
+  margin-bottom: 4px;
+}
+
+.notice-desc {
+  font-size: 11px;
+  color: rgba(253, 230, 138, 0.75);
+  line-height: 1.5;
+}
+
 .heatmap-area {
   flex: 1;
   min-height: 0;
@@ -245,12 +448,25 @@ const chartOption = computed(() => {
   color: #fca5a5;
   margin-bottom: 8px;
   font-weight: 600;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .anomaly-count {
   font-weight: normal;
   font-size: 11px;
   color: rgba(252, 165, 165, 0.7);
+}
+
+.lock-hint {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(148, 163, 184, 0.6);
+  background: rgba(71, 85, 105, 0.25);
+  padding: 2px 10px;
+  border-radius: 10px;
+  white-space: nowrap;
 }
 
 .anomaly-list {
@@ -279,6 +495,11 @@ const chartOption = computed(() => {
   border-color: rgba(59, 130, 246, 0.3);
 }
 
+.anomaly-item.avoided {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
 .zone-name {
   font-weight: 600;
   color: #e2e8f0;
@@ -303,6 +524,16 @@ const chartOption = computed(() => {
 .anomaly-item.info .severity-badge {
   background: rgba(59, 130, 246, 0.3);
   color: #bfdbfe;
+}
+
+.avoid-badge {
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(100, 116, 139, 0.25);
+  color: rgba(148, 163, 184, 0.7);
+  border: 1px dashed rgba(148, 163, 184, 0.3);
 }
 
 .anomaly-section.normal {
